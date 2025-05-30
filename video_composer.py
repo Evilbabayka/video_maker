@@ -14,15 +14,16 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 import random
 
-# Импорт библиотек для работы с видео
+# Импорт библиотек для работы с видео (MoviePy 2.2.1)
 try:
-    from moviepy.editor import (
+    from moviepy import (
+        VideoFileClip,
         ImageClip,
+        TextClip,
         AudioFileClip,
         CompositeVideoClip,
-        concatenate_videoclips,
-        TextClip,
     )
+    from moviepy import concatenate_videoclips, concatenate_audioclips
     from PIL import Image
     import pysrt
 except ImportError as e:
@@ -170,9 +171,11 @@ class VideoComposer:
             # Загружаем изображение и подгоняем под нужный размер
             resized_image = self._resize_image(image_path)
 
-            # Создаем базовый клип
+            # Создаем базовый клип с указанием длительности
             clip = ImageClip(resized_image, duration=self.image_duration)
-            clip = clip.set_fps(self.fps)
+
+            # Устанавливаем FPS через with_fps (новый API MoviePy 2.2.1)
+            clip = clip.with_fps(self.fps)
 
             # Добавляем эффект зума (если включен)
             if self.zoom_enabled:
@@ -194,40 +197,52 @@ class VideoComposer:
         Returns:
             str: путь к обработанному изображению
         """
-        # Открываем изображение
-        with Image.open(image_path) as img:
-            # Получаем размеры
-            original_width, original_height = img.size
-            target_width, target_height = self.resolution
+        try:
+            # Открываем изображение
+            with Image.open(image_path) as img:
+                # Конвертируем в RGB если необходимо
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
 
-            # Вычисляем пропорции
-            width_ratio = target_width / original_width
-            height_ratio = target_height / original_height
+                # Получаем размеры
+                original_width, original_height = img.size
+                target_width, target_height = self.resolution
 
-            # Используем меньший коэффициент, чтобы изображение поместилось целиком
-            scale_ratio = min(width_ratio, height_ratio)
+                # Вычисляем пропорции
+                width_ratio = target_width / original_width
+                height_ratio = target_height / original_height
 
-            # Новые размеры
-            new_width = int(original_width * scale_ratio)
-            new_height = int(original_height * scale_ratio)
+                # Используем меньший коэффициент, чтобы изображение поместилось целиком
+                scale_ratio = min(width_ratio, height_ratio)
 
-            # Изменяем размер
-            resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                # Новые размеры
+                new_width = int(original_width * scale_ratio)
+                new_height = int(original_height * scale_ratio)
 
-            # Создаем фон нужного размера
-            background = Image.new("RGB", (target_width, target_height), (0, 0, 0))
+                # Изменяем размер (ИСПРАВЛЕНО: resize вместо resized)
+                resized_img = img.resize(
+                    (new_width, new_height), resample=Image.Resampling.LANCZOS
+                )
 
-            # Размещаем изображение по центру
-            paste_x = (target_width - new_width) // 2
-            paste_y = (target_height - new_height) // 2
-            background.paste(resized_img, (paste_x, paste_y))
+                # Создаем фон нужного размера
+                background = Image.new("RGB", (target_width, target_height), (0, 0, 0))
 
-            # Сохраняем во временную папку
-            temp_path = f"temp/resized_{Path(image_path).name}"
-            os.makedirs("temp", exist_ok=True)
-            background.save(temp_path, quality=95)
+                # Размещаем изображение по центру
+                paste_x = (target_width - new_width) // 2
+                paste_y = (target_height - new_height) // 2
+                background.paste(resized_img, (paste_x, paste_y))
 
-            return temp_path
+                # Сохраняем во временную папку
+                temp_path = f"temp/resized_{Path(image_path).name}"
+                os.makedirs("temp", exist_ok=True)
+                background.save(temp_path, quality=95)
+
+                return temp_path
+
+        except Exception as e:
+            logging.error(f"Ошибка изменения размера изображения {image_path}: {e}")
+            # Возвращаем оригинальный путь в случае ошибки
+            return image_path
 
     def _add_zoom_effect(self, clip):
         """
@@ -239,37 +254,34 @@ class VideoComposer:
         Returns:
             видеоклип с эффектом зума
         """
-        # Параметры зума
-        zoom_factor = 1.2  # насколько увеличиваем (1.2 = на 20%)
+        try:
+            # Параметры зума
+            zoom_factor = 1.2  # насколько увеличиваем (1.2 = на 20%)
 
-        # Случайно выбираем направление зума
-        zoom_in = random.choice([True, False])
+            # Случайно выбираем направление зума
+            zoom_in = random.choice([True, False])
 
-        if zoom_in:
-            # Зум внутрь (от большего к меньшему)
-            start_scale = zoom_factor
-            end_scale = 1.0
-        else:
-            # Зум наружу (от меньшего к большему)
-            start_scale = 1.0
-            end_scale = zoom_factor
+            if zoom_in:
+                # Зум внутрь (от большего к меньшему)
+                start_scale = zoom_factor
+                end_scale = 1.0
+            else:
+                # Зум наружу (от меньшего к большему)
+                start_scale = 1.0
+                end_scale = zoom_factor
 
-        # Применяем эффект масштабирования
-        def resize_func(get_frame, t):
-            # Вычисляем текущий масштаб
-            progress = t / clip.duration
-            current_scale = start_scale + (end_scale - start_scale) * progress
+            # Функция для плавного изменения масштаба
+            def resize_func(t):
+                progress = t / clip.duration
+                current_scale = start_scale + (end_scale - start_scale) * progress
+                return current_scale
 
-            # Получаем кадр и масштабируем его
-            frame = get_frame(t)
-            return frame
+            # Применяем плавный зум через resize
+            return clip.resized(resize_func)
 
-        # Применяем функцию изменения размера
-        clip_with_zoom = clip.resize(
-            lambda t: start_scale + (end_scale - start_scale) * (t / clip.duration)
-        )
-
-        return clip_with_zoom
+        except Exception as e:
+            logging.warning(f"Ошибка добавления эффекта зума: {e}")
+            return clip
 
     def _add_audio(self, video_clip, audio_file: str):
         """
@@ -292,7 +304,7 @@ class VideoComposer:
 
             if audio_duration > video_duration:
                 # Аудио длиннее видео - обрезаем аудио
-                audio_clip = audio_clip.subclip(0, video_duration)
+                audio_clip = audio_clip.subclipped(0, video_duration)
                 print(f"🎵 Аудио обрезано до {video_duration:.1f} секунд")
 
             elif audio_duration < video_duration:
@@ -301,17 +313,17 @@ class VideoComposer:
                     # Если аудио можно зациклить не более 2 раз
                     loops_needed = int(video_duration / audio_duration) + 1
                     audio_clips = [audio_clip] * loops_needed
-                    audio_clip = concatenate_videoclips(audio_clips).subclip(
+                    audio_clip = concatenate_audioclips(audio_clips).subclipped(
                         0, video_duration
                     )
                     print(f"🎵 Аудио зациклено для соответствия длительности видео")
                 else:
                     # Обрезаем видео под аудио
-                    video_clip = video_clip.subclip(0, audio_duration)
+                    video_clip = video_clip.subclipped(0, audio_duration)
                     print(f"🎞️ Видео обрезано до {audio_duration:.1f} секунд")
 
-            # Добавляем аудио к видео
-            final_clip = video_clip.set_audio(audio_clip)
+            # Добавляем аудио к видео с использованием with_audio (MoviePy 2.2.1)
+            final_clip = video_clip.with_audio(audio_clip)
 
             return final_clip
 
@@ -355,12 +367,10 @@ class VideoComposer:
                             method="caption",
                             size=(self.resolution[0] - 100, None),  # Отступы по бокам
                         )
-                        .set_duration(duration)
-                        .set_start(start_time)
+                        .with_duration(duration)
+                        .with_start(start_time)
+                        .with_position(self.subtitle_position)
                     )
-
-                    # Позиционируем субтитры
-                    text_clip = text_clip.set_position(self.subtitle_position)
 
                     subtitle_clips.append(text_clip)
 
@@ -423,8 +433,8 @@ class VideoComposer:
                 codec=codec,
                 audio_codec=audio_codec,
                 bitrate=bitrate,
-                verbose=False,  # Отключаем подробный вывод FFmpeg
-                logger=None,  # Отключаем логи MoviePy
+                # verbose=False,  # Отключаем подробный вывод FFmpeg
+                # logger=None,  # Отключаем логи MoviePy
             )
 
             print(f"✅ Видео сохранено: {output_file}")
