@@ -294,6 +294,7 @@ class VideoComposer:
         Returns:
             видеоклип с аудио
         """
+        """Старое определение длительности клипа
         try:
             # Загружаем аудиофайл
             audio_clip = AudioFileClip(audio_file)
@@ -325,6 +326,28 @@ class VideoComposer:
             # Добавляем аудио к видео с использованием with_audio (MoviePy 2.2.1)
             final_clip = video_clip.with_audio(audio_clip)
 
+            return final_clip
+
+        except Exception as e:
+            logging.error(f"Ошибка добавления аудио: {e}")
+            print(f"⚠️ Продолжаем без аудио из-за ошибки: {e}")
+            return video_clip"""
+
+        # Новое определение длительности клипа
+        try:
+            audio_clip = AudioFileClip(audio_file)
+            video_duration = video_clip.duration
+            audio_duration = audio_clip.duration
+
+            # Обрезаем или растягиваем видео под длину аудио
+            if video_duration > audio_duration:
+                video_clip = video_clip.subclip(0, audio_duration)
+                print(f"🎞️ Видео обрезано до {audio_duration:.1f} секунд")
+            elif audio_duration > video_duration:
+                # Можно зациклить видео, если нужно (по желанию)
+                pass
+
+            final_clip = video_clip.with_audio(audio_clip)
             return final_clip
 
         except Exception as e:
@@ -435,7 +458,7 @@ class VideoComposer:
                 bitrate=bitrate,
                 # verbose=False,  # Отключаем подробный вывод FFmpeg
                 # logger=None,  # Отключаем логи MoviePy
-                temp_audiofile="temp/resultTEMP_MPY_wvf_snd.mp4"
+                temp_audiofile="temp/resultTEMP_MPY_wvf_snd.mp4",
             )
 
             print(f"✅ Видео сохранено: {output_file}")
