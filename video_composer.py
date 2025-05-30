@@ -435,6 +435,7 @@ class VideoComposer:
                 bitrate=bitrate,
                 # verbose=False,  # Отключаем подробный вывод FFmpeg
                 # logger=None,  # Отключаем логи MoviePy
+                temp_audiofile="temp/resultTEMP_MPY_wvf_snd.mp4"
             )
 
             print(f"✅ Видео сохранено: {output_file}")

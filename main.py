@@ -30,7 +30,7 @@ def setup_logging():
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
         handlers=[
-            logging.FileHandler("video_maker.log", encoding="utf-8"),
+            logging.FileHandler("logs/video_maker.log", encoding="utf-8"),
             logging.StreamHandler(),
         ],
     )
